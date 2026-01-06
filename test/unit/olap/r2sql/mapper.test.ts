@@ -1,41 +1,17 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
+import { createResultMapper, type FieldMapping } from '../../../../src/olap/r2sql'
 
 /**
- * RED Phase Tests: ResultMapper
+ * GREEN Phase Tests: ResultMapper
  *
  * These tests define the expected behavior for mapping SQL results back to
  * MongoDB document format. This includes handling nested fields, array reconstruction,
  * type coercion, and aggregation result formatting.
- *
- * Implementation will be in: src/olap/r2sql/mapper.ts
  */
 
-// Mock types for the implementation
-interface MapperOptions {
-  preserveUnderscoreId?: boolean
-  dateFields?: string[]
-  arrayFields?: string[]
-  nestedFieldSeparator?: string
-}
-
-interface FieldMapping {
-  sqlColumn: string
-  mongoField: string
-  type?: 'string' | 'number' | 'boolean' | 'date' | 'object' | 'array'
-  nested?: boolean
-}
-
-interface ResultMapper {
-  mapRow(row: Record<string, unknown>): Record<string, unknown>
-  mapRows(rows: Record<string, unknown>[]): Record<string, unknown>[]
-  mapAggregationResult(rows: Record<string, unknown>[]): Record<string, unknown>[]
-}
-
-describe.skip('ResultMapper', () => {
+describe('ResultMapper', () => {
   describe('Basic Field Mapping', () => {
-    it('should map flat SQL row to document', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should map flat SQL row to document', () => {
       const mapper = createResultMapper()
       const row = { id: 'doc-1', name: 'Test', age: 25 }
 
@@ -44,9 +20,7 @@ describe.skip('ResultMapper', () => {
       expect(doc).toEqual({ id: 'doc-1', name: 'Test', age: 25 })
     })
 
-    it('should preserve _id field from SQL _id column', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should preserve _id field from SQL _id column', () => {
       const mapper = createResultMapper({ preserveUnderscoreId: true })
       const row = { _id: 'doc-123', name: 'Test' }
 
@@ -55,9 +29,7 @@ describe.skip('ResultMapper', () => {
       expect(doc._id).toBe('doc-123')
     })
 
-    it('should convert doc_id column to _id field', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should convert doc_id column to _id field', () => {
       const mapper = createResultMapper()
       const row = { doc_id: 'doc-123', name: 'Test' }
 
@@ -67,27 +39,23 @@ describe.skip('ResultMapper', () => {
       expect(doc.doc_id).toBeUndefined()
     })
 
-    it('should map multiple rows', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should map multiple rows', () => {
       const mapper = createResultMapper()
       const rows = [
-        { id: '1', value: 10 },
-        { id: '2', value: 20 },
-        { id: '3', value: 30 },
+        { id: 'doc-1', value: 10 },
+        { id: 'doc-2', value: 20 },
+        { id: 'doc-3', value: 30 },
       ]
 
       const docs = mapper.mapRows(rows)
 
       expect(docs).toHaveLength(3)
-      expect(docs[1]).toEqual({ id: '2', value: 20 })
+      expect(docs[1]).toEqual({ id: 'doc-2', value: 20 })
     })
   })
 
   describe('Nested Field Reconstruction', () => {
-    it('should reconstruct dot-notation fields', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should reconstruct dot-notation fields', () => {
       const mapper = createResultMapper()
       const row = {
         id: 'doc-1',
@@ -106,9 +74,7 @@ describe.skip('ResultMapper', () => {
       })
     })
 
-    it('should handle deeply nested fields', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle deeply nested fields', () => {
       const mapper = createResultMapper()
       const row = {
         id: 'doc-1',
@@ -131,9 +97,7 @@ describe.skip('ResultMapper', () => {
       })
     })
 
-    it('should use custom nested field separator', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should use custom nested field separator', () => {
       const mapper = createResultMapper({ nestedFieldSeparator: '.' })
       const row = {
         id: 'doc-1',
@@ -149,9 +113,7 @@ describe.skip('ResultMapper', () => {
       })
     })
 
-    it('should merge nested fields with existing values', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should merge nested fields with existing values', () => {
       const mapper = createResultMapper()
       const row = {
         id: 'doc-1',
@@ -173,9 +135,7 @@ describe.skip('ResultMapper', () => {
   })
 
   describe('Array Reconstruction', () => {
-    it('should reconstruct arrays from indexed columns', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should reconstruct arrays from indexed columns', () => {
       const mapper = createResultMapper({ arrayFields: ['tags'] })
       const row = {
         id: 'doc-1',
@@ -189,9 +149,7 @@ describe.skip('ResultMapper', () => {
       expect(doc.tags).toEqual(['javascript', 'typescript', 'nodejs'])
     })
 
-    it('should handle sparse arrays', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle sparse arrays', () => {
       const mapper = createResultMapper({ arrayFields: ['items'] })
       const row = {
         id: 'doc-1',
@@ -205,9 +163,7 @@ describe.skip('ResultMapper', () => {
       expect(doc.items).toEqual(['first', undefined, 'third'])
     })
 
-    it('should reconstruct nested object arrays', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should reconstruct nested object arrays', () => {
       const mapper = createResultMapper({ arrayFields: ['orders'] })
       const row = {
         id: 'doc-1',
@@ -225,9 +181,7 @@ describe.skip('ResultMapper', () => {
       ])
     })
 
-    it('should handle JSON array columns', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle JSON array columns', () => {
       const mapper = createResultMapper()
       const row = {
         id: 'doc-1',
@@ -241,9 +195,7 @@ describe.skip('ResultMapper', () => {
   })
 
   describe('Type Coercion', () => {
-    it('should coerce date strings to Date objects', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should coerce date strings to Date objects', () => {
       const mapper = createResultMapper({ dateFields: ['createdAt', 'updatedAt'] })
       const row = {
         id: 'doc-1',
@@ -257,9 +209,7 @@ describe.skip('ResultMapper', () => {
       expect((doc.createdAt as Date).toISOString()).toBe('2024-01-15T10:30:00.000Z')
     })
 
-    it('should coerce numeric strings to numbers', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should coerce numeric strings to numbers', () => {
       const mapper = createResultMapper()
       const row = {
         id: 'doc-1',
@@ -273,9 +223,7 @@ describe.skip('ResultMapper', () => {
       expect(doc.price).toBe(19.99)
     })
 
-    it('should coerce boolean strings', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should coerce boolean strings', () => {
       const mapper = createResultMapper()
       const row = {
         id: 'doc-1',
@@ -293,9 +241,7 @@ describe.skip('ResultMapper', () => {
       expect(doc.disabled).toBe(false)
     })
 
-    it('should parse JSON object columns', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should parse JSON object columns', () => {
       const mapper = createResultMapper()
       const row = {
         id: 'doc-1',
@@ -307,9 +253,7 @@ describe.skip('ResultMapper', () => {
       expect(doc.metadata).toEqual({ key: 'value', nested: { a: 1 } })
     })
 
-    it('should handle null values', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle null values', () => {
       const mapper = createResultMapper()
       const row = {
         id: 'doc-1',
@@ -323,9 +267,7 @@ describe.skip('ResultMapper', () => {
       expect(doc.age).toBeNull()
     })
 
-    it('should preserve undefined for missing fields', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should preserve undefined for missing fields', () => {
       const mapper = createResultMapper()
       const row = { id: 'doc-1' }
 
@@ -336,9 +278,7 @@ describe.skip('ResultMapper', () => {
   })
 
   describe('Aggregation Result Mapping', () => {
-    it('should map $group _id to document', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should map $group _id to document', () => {
       const mapper = createResultMapper()
       const rows = [
         { _id: 'category-1', count: 10, total: 500 },
@@ -353,9 +293,7 @@ describe.skip('ResultMapper', () => {
       ])
     })
 
-    it('should handle compound _id from multiple group fields', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle compound _id from multiple group fields', () => {
       const mapper = createResultMapper()
       const rows = [
         { '_id__year': 2024, '_id__month': 1, count: 100 },
@@ -370,9 +308,7 @@ describe.skip('ResultMapper', () => {
       ])
     })
 
-    it('should handle null _id for full collection aggregation', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle null _id for full collection aggregation', () => {
       const mapper = createResultMapper()
       const rows = [{ _id: null, totalCount: 1000, avgPrice: 45.50 }]
 
@@ -381,9 +317,7 @@ describe.skip('ResultMapper', () => {
       expect(docs).toEqual([{ _id: null, totalCount: 1000, avgPrice: 45.50 }])
     })
 
-    it('should rename SQL aggregate aliases to MongoDB format', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should rename SQL aggregate aliases to MongoDB format', () => {
       const mapper = createResultMapper()
       const rows = [
         { category: 'A', sum_price: 500, avg_price: 50, count_star: 10 },
@@ -401,9 +335,7 @@ describe.skip('ResultMapper', () => {
   })
 
   describe('Custom Field Mappings', () => {
-    it('should apply custom field mappings', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should apply custom field mappings', () => {
       const mappings: FieldMapping[] = [
         { sqlColumn: 'user_id', mongoField: 'userId' },
         { sqlColumn: 'created_timestamp', mongoField: 'createdAt', type: 'date' },
@@ -422,9 +354,7 @@ describe.skip('ResultMapper', () => {
       expect(doc.user_id).toBeUndefined()
     })
 
-    it('should handle snake_case to camelCase conversion', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle snake_case to camelCase conversion', () => {
       const mapper = createResultMapper({ snakeToCamel: true })
       const row = {
         user_name: 'John',
@@ -443,9 +373,7 @@ describe.skip('ResultMapper', () => {
   })
 
   describe('$lookup Result Handling', () => {
-    it('should reconstruct $lookup joined arrays', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should reconstruct $lookup joined arrays', () => {
       const mapper = createResultMapper()
       // Simulating denormalized join results
       const rows = [
@@ -471,9 +399,7 @@ describe.skip('ResultMapper', () => {
       })
     })
 
-    it('should handle empty lookup arrays', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle empty lookup arrays', () => {
       const mapper = createResultMapper({ arrayFields: ['relatedDocs'] })
       const rows = [
         { _id: 'doc-1', name: 'Test' },
@@ -487,9 +413,7 @@ describe.skip('ResultMapper', () => {
   })
 
   describe('$unwind Handling', () => {
-    it('should handle unwound array elements', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle unwound array elements', () => {
       const mapper = createResultMapper()
       // Each row represents an unwound element
       const rows = [
@@ -505,9 +429,7 @@ describe.skip('ResultMapper', () => {
       expect(docs[1].tags).toBe('typescript')
     })
 
-    it('should include array index when preserveNullAndEmptyArrays used', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should include array index when preserveNullAndEmptyArrays used', () => {
       const mapper = createResultMapper()
       const rows = [
         { _id: 'doc-1', tags: 'a', tags_index: 0 },
@@ -521,9 +443,7 @@ describe.skip('ResultMapper', () => {
   })
 
   describe('$project Handling', () => {
-    it('should handle renamed fields from $project', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle renamed fields from $project', () => {
       const mapper = createResultMapper()
       const row = {
         fullName: 'John Doe', // renamed from name.first + name.last
@@ -538,9 +458,7 @@ describe.skip('ResultMapper', () => {
       })
     })
 
-    it('should handle computed fields', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle computed fields', () => {
       const mapper = createResultMapper()
       const row = {
         _id: 'doc-1',
@@ -556,18 +474,14 @@ describe.skip('ResultMapper', () => {
   })
 
   describe('Edge Cases', () => {
-    it('should handle empty rows array', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle empty rows array', () => {
       const mapper = createResultMapper()
       const docs = mapper.mapRows([])
 
       expect(docs).toEqual([])
     })
 
-    it('should handle row with only _id', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle row with only _id', () => {
       const mapper = createResultMapper()
       const row = { _id: 'doc-1' }
 
@@ -576,9 +490,7 @@ describe.skip('ResultMapper', () => {
       expect(doc).toEqual({ _id: 'doc-1' })
     })
 
-    it('should handle special characters in field names', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle special characters in field names', () => {
       const mapper = createResultMapper()
       const row = {
         _id: 'doc-1',
@@ -591,9 +503,7 @@ describe.skip('ResultMapper', () => {
       expect(doc['field-with-dashes']).toBe('value1')
     })
 
-    it('should handle very large numbers', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle very large numbers', () => {
       const mapper = createResultMapper()
       const row = {
         _id: 'doc-1',
@@ -606,9 +516,7 @@ describe.skip('ResultMapper', () => {
       expect(typeof doc.bigNumber === 'bigint' || typeof doc.bigNumber === 'string').toBe(true)
     })
 
-    it('should handle binary/blob data', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle binary/blob data', () => {
       const mapper = createResultMapper()
       const row = {
         _id: 'doc-1',
@@ -620,9 +528,7 @@ describe.skip('ResultMapper', () => {
       expect(doc.binaryData).toBeDefined()
     })
 
-    it('should handle circular reference detection in JSON parsing', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should handle circular reference detection in JSON parsing', () => {
       const mapper = createResultMapper()
       const row = {
         _id: 'doc-1',
@@ -637,9 +543,7 @@ describe.skip('ResultMapper', () => {
   })
 
   describe('Performance', () => {
-    it('should efficiently map large result sets', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should efficiently map large result sets', () => {
       const mapper = createResultMapper()
       const rows = Array.from({ length: 10000 }, (_, i) => ({
         _id: `doc-${i}`,
@@ -655,9 +559,7 @@ describe.skip('ResultMapper', () => {
       expect(duration).toBeLessThan(1000) // Should complete in under 1 second
     })
 
-    it('should reuse mapper for multiple operations', async () => {
-      const { createResultMapper } = await import('@/olap/r2sql/mapper')
-
+    it('should reuse mapper for multiple operations', () => {
       const mapper = createResultMapper({ dateFields: ['createdAt'] })
 
       // Map multiple batches with same mapper

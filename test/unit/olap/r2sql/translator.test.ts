@@ -17,103 +17,19 @@
  * These are intentional RED tests awaiting implementation.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-
-// =============================================================================
-// Type Definitions (to be implemented in src/olap/r2sql/translator.ts)
-// =============================================================================
-
-/**
- * MongoDB aggregation pipeline stage
- */
-type PipelineStage =
-  | { $match: Record<string, unknown> }
-  | { $group: { _id: unknown; [key: string]: unknown } }
-  | { $project: Record<string, 0 | 1 | unknown> }
-  | { $sort: Record<string, 1 | -1> }
-  | { $limit: number }
-  | { $skip: number }
-  | { $unwind: string | { path: string; preserveNullAndEmptyArrays?: boolean } }
-  | { $lookup: { from: string; localField: string; foreignField: string; as: string } }
-  | { $count: string }
-  | { $addFields: Record<string, unknown> }
-
-/**
- * Translation options
- */
-interface TranslationOptions {
-  /** Table name in R2 */
-  tableName: string
-  /** Namespace (schema) name */
-  namespace?: string
-  /** Partition columns for automatic filtering */
-  partitionColumns?: string[]
-  /** Maximum query complexity allowed */
-  maxComplexity?: number
-  /** Enable query optimization */
-  optimize?: boolean
-}
-
-/**
- * Translated SQL query
- */
-interface TranslatedQuery {
-  /** The SQL query string */
-  sql: string
-  /** Parameter values for prepared statement */
-  parameters: unknown[]
-  /** Estimated query complexity */
-  complexity: number
-  /** Warning messages (e.g., for potentially slow queries) */
-  warnings: string[]
-  /** Original pipeline for reference */
-  originalPipeline: PipelineStage[]
-}
-
-/**
- * Translation error
- */
-interface TranslationError {
-  /** Error code */
-  code: string
-  /** Human-readable message */
-  message: string
-  /** Stage index where error occurred */
-  stageIndex?: number
-  /** The problematic stage */
-  stage?: PipelineStage
-}
-
-/**
- * Result of translation attempt
- */
-type TranslationResult =
-  | { success: true; query: TranslatedQuery }
-  | { success: false; error: TranslationError }
-
-/**
- * SQL translator interface
- */
-interface R2SQLTranslator {
-  translate(pipeline: PipelineStage[], options: TranslationOptions): TranslationResult
-  validatePipeline(pipeline: PipelineStage[]): TranslationError[]
-  getSupportedOperators(): string[]
-}
-
-// Mock factory (to be replaced with actual implementation)
-function createMockTranslator(): R2SQLTranslator {
-  return {
-    translate: vi.fn(),
-    validatePipeline: vi.fn(),
-    getSupportedOperators: vi.fn(),
-  }
-}
+import { describe, it, expect, beforeEach } from 'vitest'
+import {
+  R2SQLTranslator,
+  createR2SQLTranslator,
+  type PipelineStage,
+  type TranslationOptions,
+} from '../../../../src/olap/r2sql'
 
 // =============================================================================
 // Test Suites
 // =============================================================================
 
-describe.skip('R2SQLTranslator', () => {
+describe('R2SQLTranslator', () => {
   let translator: R2SQLTranslator
   const defaultOptions: TranslationOptions = {
     tableName: 'events',
@@ -121,8 +37,7 @@ describe.skip('R2SQLTranslator', () => {
   }
 
   beforeEach(() => {
-    translator = createMockTranslator()
-    vi.clearAllMocks()
+    translator = createR2SQLTranslator()
   })
 
   describe('$match to WHERE clause', () => {
@@ -309,7 +224,7 @@ describe.skip('R2SQLTranslator', () => {
 
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.query.sql).toContain('SUM(amount)')
+        expect(result.query.sql).toContain('SUM("amount")')
       }
     })
 
@@ -322,7 +237,7 @@ describe.skip('R2SQLTranslator', () => {
 
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.query.sql).toContain('AVG(price)')
+        expect(result.query.sql).toContain('AVG("price")')
       }
     })
 
@@ -335,8 +250,8 @@ describe.skip('R2SQLTranslator', () => {
 
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.query.sql).toContain('MIN(price)')
-        expect(result.query.sql).toContain('MAX(price)')
+        expect(result.query.sql).toContain('MIN("price")')
+        expect(result.query.sql).toContain('MAX("price")')
       }
     })
 

@@ -5,7 +5,7 @@
  * error handling, and JSON formatting.
  */
 
-import { useState, useCallback, useEffect, useRef, KeyboardEvent, memo, useReducer } from 'react'
+import { useState, useCallback, useEffect, useRef, KeyboardEvent, memo } from 'react'
 import { css } from '@leafygreen-ui/emotion'
 import { palette } from '@leafygreen-ui/palette'
 

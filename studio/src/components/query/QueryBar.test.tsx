@@ -131,10 +131,11 @@ describe('QueryBar', () => {
       expect(screen.getByTestId('tab-sort')).toBeInTheDocument()
     })
 
-    it('renders the editor container', () => {
+    it('renders the editor container', async () => {
       render(<QueryBar {...defaultProps} />)
 
-      expect(screen.getByTestId('query-editor')).toBeInTheDocument()
+      // Editor loads lazily, wait for it to appear
+      expect(await screen.findByTestId('query-editor')).toBeInTheDocument()
     })
 
     it('renders the execute button', () => {

@@ -1,21 +1,88 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useMemo, memo, Suspense } from 'react'
 import { css, keyframes } from '@leafygreen-ui/emotion'
 import { palette } from '@leafygreen-ui/palette'
-import { Body, Description } from '@leafygreen-ui/typography'
+import { Body } from '@leafygreen-ui/typography'
 import Button from '@leafygreen-ui/button'
 import IconButton from '@leafygreen-ui/icon-button'
 import Icon from '@leafygreen-ui/icon'
 import Tooltip from '@leafygreen-ui/tooltip'
 import Badge from '@leafygreen-ui/badge'
-import { EditorView, keymap, placeholder, lineNumbers, drawSelection, highlightActiveLine, highlightSpecialChars } from '@codemirror/view'
-import { EditorState, Compartment } from '@codemirror/state'
-import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
-import { json, jsonParseLinter } from '@codemirror/lang-json'
-import { linter, lintGutter } from '@codemirror/lint'
-import { bracketMatching, indentOnInput, syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language'
-import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete'
-import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
-import { useQueryStore, QueryValidationError } from '@stores/query'
+import { useQueryStore } from '@stores/query'
+
+// Lazy load CodeMirror modules for better initial load performance
+let codeMirrorModulesPromise: Promise<CodeMirrorModules> | null = null
+
+interface CodeMirrorModules {
+  EditorView: typeof import('@codemirror/view').EditorView
+  EditorState: typeof import('@codemirror/state').EditorState
+  Compartment: typeof import('@codemirror/state').Compartment
+  keymap: typeof import('@codemirror/view').keymap
+  placeholder: typeof import('@codemirror/view').placeholder
+  lineNumbers: typeof import('@codemirror/view').lineNumbers
+  drawSelection: typeof import('@codemirror/view').drawSelection
+  highlightActiveLine: typeof import('@codemirror/view').highlightActiveLine
+  highlightSpecialChars: typeof import('@codemirror/view').highlightSpecialChars
+  defaultKeymap: typeof import('@codemirror/commands').defaultKeymap
+  history: typeof import('@codemirror/commands').history
+  historyKeymap: typeof import('@codemirror/commands').historyKeymap
+  json: typeof import('@codemirror/lang-json').json
+  jsonParseLinter: typeof import('@codemirror/lang-json').jsonParseLinter
+  linter: typeof import('@codemirror/lint').linter
+  lintGutter: typeof import('@codemirror/lint').lintGutter
+  bracketMatching: typeof import('@codemirror/language').bracketMatching
+  indentOnInput: typeof import('@codemirror/language').indentOnInput
+  syntaxHighlighting: typeof import('@codemirror/language').syntaxHighlighting
+  defaultHighlightStyle: typeof import('@codemirror/language').defaultHighlightStyle
+  autocompletion: typeof import('@codemirror/autocomplete').autocompletion
+  closeBrackets: typeof import('@codemirror/autocomplete').closeBrackets
+  closeBracketsKeymap: typeof import('@codemirror/autocomplete').closeBracketsKeymap
+  completionKeymap: typeof import('@codemirror/autocomplete').completionKeymap
+  searchKeymap: typeof import('@codemirror/search').searchKeymap
+  highlightSelectionMatches: typeof import('@codemirror/search').highlightSelectionMatches
+}
+
+async function loadCodeMirrorModules(): Promise<CodeMirrorModules> {
+  if (!codeMirrorModulesPromise) {
+    codeMirrorModulesPromise = Promise.all([
+      import('@codemirror/view'),
+      import('@codemirror/state'),
+      import('@codemirror/commands'),
+      import('@codemirror/lang-json'),
+      import('@codemirror/lint'),
+      import('@codemirror/language'),
+      import('@codemirror/autocomplete'),
+      import('@codemirror/search'),
+    ]).then(([view, state, commands, langJson, lint, language, autocomplete, search]) => ({
+      EditorView: view.EditorView,
+      EditorState: state.EditorState,
+      Compartment: state.Compartment,
+      keymap: view.keymap,
+      placeholder: view.placeholder,
+      lineNumbers: view.lineNumbers,
+      drawSelection: view.drawSelection,
+      highlightActiveLine: view.highlightActiveLine,
+      highlightSpecialChars: view.highlightSpecialChars,
+      defaultKeymap: commands.defaultKeymap,
+      history: commands.history,
+      historyKeymap: commands.historyKeymap,
+      json: langJson.json,
+      jsonParseLinter: langJson.jsonParseLinter,
+      linter: lint.linter,
+      lintGutter: lint.lintGutter,
+      bracketMatching: language.bracketMatching,
+      indentOnInput: language.indentOnInput,
+      syntaxHighlighting: language.syntaxHighlighting,
+      defaultHighlightStyle: language.defaultHighlightStyle,
+      autocompletion: autocomplete.autocompletion,
+      closeBrackets: autocomplete.closeBrackets,
+      closeBracketsKeymap: autocomplete.closeBracketsKeymap,
+      completionKeymap: autocomplete.completionKeymap,
+      searchKeymap: search.searchKeymap,
+      highlightSelectionMatches: search.highlightSelectionMatches,
+    }))
+  }
+  return codeMirrorModulesPromise
+}
 
 // Animations
 const pulseAnimation = keyframes`
@@ -174,6 +241,10 @@ const statItemStyles = css`
 const loadingStyles = css`
   display: inline-flex;
   animation: ${spinAnimation} 1s linear infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
 `
 
 const shortcutStyles = css`
@@ -220,6 +291,10 @@ const tabButtonStyles = css`
   &:hover {
     background: ${palette.gray.light2};
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
 `
 
 const tabButtonActiveStyles = css`
@@ -247,6 +322,31 @@ const labelStyles = css`
   font-size: 13px;
 `
 
+const editorLoadingStyles = css`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 80px;
+  background: ${palette.gray.light3};
+  color: ${palette.gray.dark1};
+  font-size: 13px;
+  gap: 8px;
+`
+
+const skeletonLineStyles = css`
+  height: 16px;
+  background: linear-gradient(90deg, ${palette.gray.light2} 25%, ${palette.gray.light3} 50%, ${palette.gray.light2} 75%);
+  background-size: 200% 100%;
+  border-radius: 4px;
+  margin: 4px 12px;
+  animation: shimmer 1.5s infinite;
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+`
+
 // Types
 export interface QueryBarProps {
   database: string
@@ -268,8 +368,8 @@ export interface QueryOptions {
 
 type QueryTab = 'filter' | 'projection' | 'sort'
 
-// Editor theme
-const editorTheme = EditorView.theme({
+// Editor theme config (created with EditorView once loaded)
+const editorThemeConfig = {
   '&': {
     backgroundColor: palette.white,
   },
@@ -288,9 +388,9 @@ const editorTheme = EditorView.theme({
   '.cm-selectionMatch': {
     backgroundColor: palette.yellow.light3,
   },
-})
+}
 
-export function QueryBar({
+export const QueryBar = memo(function QueryBar({
   database,
   collection,
   onExecute,
@@ -322,9 +422,11 @@ export function QueryBar({
   } = useQueryStore()
 
   const [activeTab, setActiveTab] = useState<QueryTab>('filter')
+  const [editorLoading, setEditorLoading] = useState(true)
+  const [cmModules, setCmModules] = useState<CodeMirrorModules | null>(null)
   const editorRef = useRef<HTMLDivElement>(null)
-  const viewRef = useRef<EditorView | null>(null)
-  const readOnlyCompartment = useRef(new Compartment())
+  const viewRef = useRef<InstanceType<CodeMirrorModules['EditorView']> | null>(null)
+  const readOnlyCompartmentRef = useRef<InstanceType<CodeMirrorModules['Compartment']> | null>(null)
 
   // Get current value based on active tab
   const getCurrentValue = useCallback(() => {
@@ -419,9 +521,59 @@ export function QueryBar({
     addToHistory,
   ])
 
-  // Initialize editor
+  // Load CodeMirror modules lazily
   useEffect(() => {
-    if (!editorRef.current || viewRef.current) return
+    let cancelled = false
+
+    loadCodeMirrorModules().then((modules) => {
+      if (!cancelled) {
+        setCmModules(modules)
+        setEditorLoading(false)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Initialize editor after modules are loaded
+  useEffect(() => {
+    if (!editorRef.current || viewRef.current || !cmModules) return
+
+    const {
+      EditorView,
+      EditorState,
+      Compartment,
+      keymap,
+      placeholder,
+      lineNumbers,
+      drawSelection,
+      highlightActiveLine,
+      highlightSpecialChars,
+      defaultKeymap,
+      history,
+      historyKeymap,
+      json,
+      jsonParseLinter,
+      linter,
+      lintGutter,
+      bracketMatching,
+      indentOnInput,
+      syntaxHighlighting,
+      defaultHighlightStyle,
+      autocompletion,
+      closeBrackets,
+      closeBracketsKeymap,
+      completionKeymap,
+      searchKeymap,
+      highlightSelectionMatches,
+    } = cmModules
+
+    const readOnlyCompartment = new Compartment()
+    readOnlyCompartmentRef.current = readOnlyCompartment
+
+    const editorTheme = EditorView.theme(editorThemeConfig)
 
     const executeKeymap = keymap.of([
       {
@@ -476,7 +628,7 @@ export function QueryBar({
           ...searchKeymap,
         ]),
         updateListener,
-        readOnlyCompartment.current.of(EditorState.readOnly.of(false)),
+        readOnlyCompartment.of(EditorState.readOnly.of(false)),
         EditorView.lineWrapping,
       ],
     })
@@ -492,7 +644,7 @@ export function QueryBar({
       view.destroy()
       viewRef.current = null
     }
-  }, [])
+  }, [cmModules, executeQuery, getCurrentValue, initialQuery, onQueryChange, setCurrentValue])
 
   // Update editor content when tab changes or value changes externally
   useEffect(() => {
@@ -514,14 +666,14 @@ export function QueryBar({
 
   // Update read-only state when executing
   useEffect(() => {
-    if (!viewRef.current) return
+    if (!viewRef.current || !cmModules || !readOnlyCompartmentRef.current) return
 
     viewRef.current.dispatch({
-      effects: readOnlyCompartment.current.reconfigure(
-        EditorState.readOnly.of(isExecuting)
+      effects: readOnlyCompartmentRef.current.reconfigure(
+        cmModules.EditorState.readOnly.of(isExecuting)
       ),
     })
-  }, [isExecuting])
+  }, [isExecuting, cmModules])
 
   // Format JSON in editor
   const formatQuery = useCallback(() => {
@@ -637,11 +789,21 @@ export function QueryBar({
         </button>
       </div>
 
-      <div
-        className={editorContainerStyles}
-        ref={editorRef}
-        data-testid="query-editor"
-      />
+      {editorLoading ? (
+        <div className={editorLoadingStyles} data-testid="editor-loading">
+          <div style={{ width: '100%' }}>
+            <div className={skeletonLineStyles} style={{ width: '70%' }} />
+            <div className={skeletonLineStyles} style={{ width: '50%' }} />
+            <div className={skeletonLineStyles} style={{ width: '60%' }} />
+          </div>
+        </div>
+      ) : (
+        <div
+          className={editorContainerStyles}
+          ref={editorRef}
+          data-testid="query-editor"
+        />
+      )}
 
       {validationErrors.length > 0 && (
         <div className={errorContainerStyles} data-testid="validation-errors">
@@ -734,6 +896,6 @@ export function QueryBar({
       </div>
     </div>
   )
-}
+})
 
 export default QueryBar

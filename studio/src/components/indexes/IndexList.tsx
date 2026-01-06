@@ -11,7 +11,7 @@ import Modal from '@leafygreen-ui/modal'
 import { useIndexesQuery, useDropIndexMutation } from '@hooks/useQueries'
 import { SkeletonLoader } from '../SkeletonLoader'
 import { CreateIndexDialog } from './CreateIndexDialog'
-import type { IndexInfo } from '@lib/rpc-client'
+import type { IndexInfo, IndexUsageStats } from '@lib/rpc-client'
 
 const containerStyles = css`
   display: flex;
@@ -124,6 +124,24 @@ function formatIndexKeys(key: Record<string, 1 | -1 | 'text' | '2dsphere'>): str
     .join(', ')
 }
 
+// Format bytes to human-readable format
+function formatBytes(bytes: number | undefined): string {
+  if (bytes === undefined || bytes === null) return '-'
+  if (bytes === 0) return '0 B'
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  const size = bytes / Math.pow(1024, i)
+
+  return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`
+}
+
+// Format usage stats
+function formatUsageStats(stats: IndexUsageStats | undefined): string {
+  if (!stats) return '-'
+  return `${stats.accesses.toLocaleString()} hits`
+}
+
 export interface IndexListProps {
   database: string
   collection: string
@@ -222,6 +240,8 @@ export function IndexList({ database, collection }: IndexListProps) {
                 <th className={headerCellStyles} role="columnheader">Name</th>
                 <th className={headerCellStyles} role="columnheader">Keys</th>
                 <th className={headerCellStyles} role="columnheader">Properties</th>
+                <th className={headerCellStyles} style={{ width: 100 }} role="columnheader">Size</th>
+                <th className={headerCellStyles} style={{ width: 120 }} role="columnheader">Usage</th>
                 <th className={headerCellStyles} style={{ width: 80 }} role="columnheader">Actions</th>
               </tr>
             </thead>
@@ -249,6 +269,12 @@ export function IndexList({ database, collection }: IndexListProps) {
                         <Badge variant="lightgray">default</Badge>
                       )}
                     </div>
+                  </td>
+                  <td className={cellStyles} data-testid={`index-size-${index.name}`}>
+                    {formatBytes(index.sizeBytes)}
+                  </td>
+                  <td className={cellStyles} data-testid={`index-usage-${index.name}`}>
+                    {formatUsageStats(index.usageStats)}
                   </td>
                   <td className={`${cellStyles} ${actionsCellStyles}`}>
                     {index.name !== '_id_' ? (

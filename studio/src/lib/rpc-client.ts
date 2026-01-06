@@ -80,6 +80,23 @@ export interface IndexInfo {
   unique?: boolean
   sparse?: boolean
   expireAfterSeconds?: number
+  /** Size of the index in bytes */
+  sizeBytes?: number
+  /** Usage statistics for the index */
+  usageStats?: IndexUsageStats
+}
+
+export interface IndexUsageStats {
+  /** Number of times the index was used by queries */
+  accesses: number
+  /** Number of times queries could have used this index but didn't */
+  indexUsed?: boolean
+  /** Timestamp of last access */
+  lastAccess?: Date
+  /** Read operations that used this index */
+  readOps?: number
+  /** Write operations that updated this index */
+  writeOps?: number
 }
 
 export interface FindOptions {

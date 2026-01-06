@@ -779,6 +779,8 @@ describe('IndexList', () => {
       expect(screen.getByRole('columnheader', { name: /name/i })).toBeInTheDocument()
       expect(screen.getByRole('columnheader', { name: /keys/i })).toBeInTheDocument()
       expect(screen.getByRole('columnheader', { name: /properties/i })).toBeInTheDocument()
+      expect(screen.getByRole('columnheader', { name: /size/i })).toBeInTheDocument()
+      expect(screen.getByRole('columnheader', { name: /usage/i })).toBeInTheDocument()
     })
 
     it('delete buttons have accessible labels', () => {
@@ -919,6 +921,169 @@ describe('IndexList', () => {
 
       // Should have called with new collection
       expect(useIndexesQuery).toHaveBeenCalledWith('testdb', 'orders')
+    })
+  })
+
+  // ===========================================================================
+  // SECTION 9: Index Size and Usage Statistics
+  // ===========================================================================
+  describe('Index Size and Usage Statistics', () => {
+    it('displays index size when available', () => {
+      const indexWithSize: IndexInfo[] = [
+        {
+          name: 'email_1',
+          key: { email: 1 },
+          sizeBytes: 1024 * 1024 * 10, // 10 MB
+        },
+      ]
+
+      vi.mocked(useIndexesQuery).mockReturnValue({
+        data: indexWithSize,
+        isLoading: false,
+        error: null,
+        refetch: mockRefetch,
+      } as any)
+
+      render(<IndexList {...defaultProps} />)
+
+      expect(screen.getByTestId('index-size-email_1')).toHaveTextContent('10.0 MB')
+    })
+
+    it('displays dash when size is not available', () => {
+      vi.mocked(useIndexesQuery).mockReturnValue({
+        data: mockIndexes,
+        isLoading: false,
+        error: null,
+        refetch: mockRefetch,
+      } as any)
+
+      render(<IndexList {...defaultProps} />)
+
+      // mockIndexes don't have sizeBytes, should show dash
+      expect(screen.getByTestId('index-size-email_1')).toHaveTextContent('-')
+    })
+
+    it('displays usage stats when available', () => {
+      const indexWithUsage: IndexInfo[] = [
+        {
+          name: 'email_1',
+          key: { email: 1 },
+          usageStats: {
+            accesses: 1234567,
+          },
+        },
+      ]
+
+      vi.mocked(useIndexesQuery).mockReturnValue({
+        data: indexWithUsage,
+        isLoading: false,
+        error: null,
+        refetch: mockRefetch,
+      } as any)
+
+      render(<IndexList {...defaultProps} />)
+
+      expect(screen.getByTestId('index-usage-email_1')).toHaveTextContent('1,234,567 hits')
+    })
+
+    it('displays dash when usage stats not available', () => {
+      vi.mocked(useIndexesQuery).mockReturnValue({
+        data: mockIndexes,
+        isLoading: false,
+        error: null,
+        refetch: mockRefetch,
+      } as any)
+
+      render(<IndexList {...defaultProps} />)
+
+      // mockIndexes don't have usageStats, should show dash
+      expect(screen.getByTestId('index-usage-email_1')).toHaveTextContent('-')
+    })
+
+    it('formats small sizes correctly', () => {
+      const indexWithSmallSize: IndexInfo[] = [
+        {
+          name: 'small_idx',
+          key: { field: 1 },
+          sizeBytes: 512, // 512 bytes
+        },
+      ]
+
+      vi.mocked(useIndexesQuery).mockReturnValue({
+        data: indexWithSmallSize,
+        isLoading: false,
+        error: null,
+        refetch: mockRefetch,
+      } as any)
+
+      render(<IndexList {...defaultProps} />)
+
+      expect(screen.getByTestId('index-size-small_idx')).toHaveTextContent('512 B')
+    })
+
+    it('formats KB sizes correctly', () => {
+      const indexWithKBSize: IndexInfo[] = [
+        {
+          name: 'kb_idx',
+          key: { field: 1 },
+          sizeBytes: 1024 * 5.5, // 5.5 KB
+        },
+      ]
+
+      vi.mocked(useIndexesQuery).mockReturnValue({
+        data: indexWithKBSize,
+        isLoading: false,
+        error: null,
+        refetch: mockRefetch,
+      } as any)
+
+      render(<IndexList {...defaultProps} />)
+
+      expect(screen.getByTestId('index-size-kb_idx')).toHaveTextContent('5.5 KB')
+    })
+
+    it('formats GB sizes correctly', () => {
+      const indexWithGBSize: IndexInfo[] = [
+        {
+          name: 'large_idx',
+          key: { field: 1 },
+          sizeBytes: 1024 * 1024 * 1024 * 2.3, // 2.3 GB
+        },
+      ]
+
+      vi.mocked(useIndexesQuery).mockReturnValue({
+        data: indexWithGBSize,
+        isLoading: false,
+        error: null,
+        refetch: mockRefetch,
+      } as any)
+
+      render(<IndexList {...defaultProps} />)
+
+      expect(screen.getByTestId('index-size-large_idx')).toHaveTextContent('2.3 GB')
+    })
+
+    it('formats zero usage correctly', () => {
+      const indexWithZeroUsage: IndexInfo[] = [
+        {
+          name: 'unused_idx',
+          key: { field: 1 },
+          usageStats: {
+            accesses: 0,
+          },
+        },
+      ]
+
+      vi.mocked(useIndexesQuery).mockReturnValue({
+        data: indexWithZeroUsage,
+        isLoading: false,
+        error: null,
+        refetch: mockRefetch,
+      } as any)
+
+      render(<IndexList {...defaultProps} />)
+
+      expect(screen.getByTestId('index-usage-unused_idx')).toHaveTextContent('0 hits')
     })
   })
 })

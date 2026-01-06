@@ -131,12 +131,15 @@ describe('SafeArrayAccess', () => {
       // onStageSelect?.(stages[selectedIndex + 1]?.id) with proper undefined filtering
 
       const hasSafeArrowDownGuard =
-        // Optional chaining that returns undefined (not passed to callback)
-        /if\s*\(\s*selectedIndex\s*<\s*stages\.length\s*-\s*1\s*\)/.test(sourceCode) &&
+        // Checks for safe pattern: uses optional chaining and bounds check
+        // Pattern: if (selectedIndex < stages.length - 1 [&& nextStageId])
+        /if\s*\(\s*selectedIndex\s*<\s*stages\.length\s*-\s*1/.test(sourceCode) &&
+        // Must NOT use non-null assertion
         !/onStageSelect\?\.\(stages\[selectedIndex \+ 1\]!/.test(sourceCode)
 
       const hasSafeArrowUpGuard =
-        /if\s*\(\s*selectedIndex\s*>\s*0\s*\)/.test(sourceCode) &&
+        // Pattern: if (selectedIndex > 0 [&& prevStageId])
+        /if\s*\(\s*selectedIndex\s*>\s*0/.test(sourceCode) &&
         !/onStageSelect\?\.\(stages\[selectedIndex - 1\]!/.test(sourceCode)
 
       // Check that the guards protect against undefined

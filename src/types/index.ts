@@ -1,8 +1,25 @@
 /**
  * Common types for mongo.do
+ *
+ * This module re-exports all public types for the mongo.do library.
  */
 
 export { ObjectId, default as ObjectIdDefault } from './objectid'
+
+// Environment and binding types
+export type { Env } from './env'
+export type {
+  VectorizeMetadataValue,
+  VectorizeMetadata,
+  VectorizeVector,
+  VectorizeQueryOptions,
+  VectorizeMatch,
+  VectorizeQueryResult,
+  VectorizeMutationResult,
+  VectorizeIndex,
+  Ai,
+  EmbeddingResult,
+} from './vectorize'
 export type {
   FunctionSpec,
   FunctionDefinition,

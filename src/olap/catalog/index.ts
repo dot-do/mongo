@@ -52,6 +52,41 @@ export {
 // Maintenance exports
 export { MaintenanceClient, createMaintenanceClient } from './maintenance'
 
+// Schema evolution exports
+export {
+  SchemaEvolutionManager,
+  createSchemaEvolutionManager,
+  mongoTypeToIceberg,
+  isValidTypeWidening,
+  computeSchemaDiff,
+  type SchemaEvolutionConfig,
+  type SchemaEvolutionEvent,
+  type FieldDiff,
+} from './evolution'
+
+// Compaction management exports
+export {
+  CompactionManager,
+  createCompactionManager,
+  type AutoCompactionConfig,
+  type CompactionJob,
+  type CompactionStatus,
+  type TargetSizePreset,
+  type CompactionSchedule,
+} from './compaction'
+
+// Multi-table strategy exports
+export {
+  MultiTableStrategyManager,
+  createMultiTableStrategyManager,
+  type TableMaintenancePolicy,
+  type MultiTableStrategyConfig,
+  type TableHealth,
+  type StrategyExecutionStatus,
+  type MaintenancePriority,
+  type MaintenanceOrderStrategy,
+} from './strategy'
+
 // Schema exports
 export {
   MONDODB_CDC_SCHEMA,

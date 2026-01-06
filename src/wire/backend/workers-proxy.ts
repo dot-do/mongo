@@ -40,8 +40,12 @@ export interface WorkersProxyBackendOptions {
   timeout?: number
   /** Number of retries on transient failures (default: 0) */
   retries?: number
-  /** Delay between retries in milliseconds (default: 1000) */
+  /** Base delay between retries in milliseconds (default: 1000) */
   retryDelay?: number
+  /** Use exponential backoff for retries (default: true) */
+  exponentialBackoff?: boolean
+  /** Maximum delay between retries in milliseconds (default: 30000) */
+  maxRetryDelay?: number
 }
 
 /**
@@ -130,7 +134,10 @@ export class WorkersProxyBackend implements MondoBackend {
   private timeout: number
   private retries: number
   private retryDelay: number
+  private exponentialBackoff: boolean
+  private maxRetryDelay: number
   private cursors: Map<bigint, CursorState> = new Map()
+  private requestIdCounter = 0
 
   constructor(options: WorkersProxyBackendOptions) {
     // Validate endpoint
@@ -151,6 +158,28 @@ export class WorkersProxyBackend implements MondoBackend {
     this.timeout = options.timeout ?? 30000
     this.retries = options.retries ?? 0
     this.retryDelay = options.retryDelay ?? 1000
+    this.exponentialBackoff = options.exponentialBackoff ?? true
+    this.maxRetryDelay = options.maxRetryDelay ?? 30000
+  }
+
+  /**
+   * Generate unique request ID for tracing
+   */
+  private nextRequestId(): string {
+    return `req-${Date.now()}-${++this.requestIdCounter}`
+  }
+
+  /**
+   * Calculate delay for retry attempt using exponential backoff
+   */
+  private calculateRetryDelay(attempt: number): number {
+    if (!this.exponentialBackoff) {
+      return this.retryDelay
+    }
+    // Exponential backoff with jitter: baseDelay * 2^attempt + random jitter
+    const exponentialDelay = this.retryDelay * Math.pow(2, attempt)
+    const jitter = Math.random() * this.retryDelay * 0.5
+    return Math.min(exponentialDelay + jitter, this.maxRetryDelay)
   }
 
   // ==========================================================================
@@ -160,9 +189,11 @@ export class WorkersProxyBackend implements MondoBackend {
   /**
    * Make an RPC call to the Workers endpoint
    */
-  private async rpc<T>(request: RpcRequest, attempt = 0): Promise<T> {
+  private async rpc<T>(request: RpcRequest, attempt = 0, requestId?: string): Promise<T> {
+    const reqId = requestId ?? this.nextRequestId()
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
+      'X-Request-ID': reqId,
     }
 
     if (this.authToken) {
@@ -183,8 +214,8 @@ export class WorkersProxyBackend implements MondoBackend {
 
         // Retry on retryable status codes
         if (RETRYABLE_STATUS_CODES.has(response.status) && attempt < this.retries) {
-          await this.delay(this.retryDelay)
-          return this.rpc<T>(request, attempt + 1)
+          await this.delay(this.calculateRetryDelay(attempt))
+          return this.rpc<T>(request, attempt + 1, reqId)
         }
 
         throw error
@@ -218,8 +249,8 @@ export class WorkersProxyBackend implements MondoBackend {
         error instanceof Error &&
         !('code' in error && NON_RETRYABLE_ERROR_CODES.has((error as MongoProxyError).code))
       ) {
-        await this.delay(this.retryDelay)
-        return this.rpc<T>(request, attempt + 1)
+        await this.delay(this.calculateRetryDelay(attempt))
+        return this.rpc<T>(request, attempt + 1, reqId)
       }
 
       throw error

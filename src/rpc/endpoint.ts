@@ -23,11 +23,32 @@ import { ErrorCode } from '../types/rpc'
 export type { RpcHandler }
 
 /**
+ * Rate limiting hook result
+ */
+export interface RateLimitResult {
+  allowed: boolean
+  retryAfter?: number // seconds until request should be retried
+  remaining?: number // remaining requests in window
+  limit?: number // total requests allowed in window
+}
+
+/**
+ * Rate limiting hook function type
+ */
+export type RateLimitHook = (
+  request: Request,
+  method: string,
+  clientId?: string
+) => Promise<RateLimitResult> | RateLimitResult
+
+/**
  * Environment with MONDO_DATABASE Durable Object binding
  */
 export interface RpcEnv {
   MONDO_DATABASE: DurableObjectNamespace
   MONDO_AUTH_TOKEN?: string
+  /** Optional rate limiting hook */
+  rateLimitHook?: RateLimitHook
 }
 
 // Use the imported HttpRpcRequest type internally
@@ -118,8 +139,51 @@ const WRITE_METHODS = new Set([
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Mondo-Token',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Mondo-Token, Accept-Encoding',
+  'Access-Control-Expose-Headers': 'X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, X-Request-ID',
   'Access-Control-Max-Age': '86400',
+}
+
+/**
+ * Read-only methods that can be cached
+ */
+const CACHEABLE_METHODS = new Set(['find', 'count', 'countDocuments', 'listDatabases', 'listCollections', 'listIndexes', 'collStats', 'dbStats'])
+
+/**
+ * Get cache headers based on method
+ */
+function getCacheHeaders(method: string): Record<string, string> {
+  if (CACHEABLE_METHODS.has(method)) {
+    return {
+      'Cache-Control': 'private, max-age=0, must-revalidate',
+      'Vary': 'Authorization, Accept-Encoding',
+    }
+  }
+  return {
+    'Cache-Control': 'no-store',
+  }
+}
+
+/**
+ * Get rate limit headers if rate limit info is available
+ */
+function getRateLimitHeaders(rateLimitResult?: RateLimitResult): Record<string, string> {
+  if (!rateLimitResult) return {}
+
+  const headers: Record<string, string> = {}
+
+  if (rateLimitResult.limit !== undefined) {
+    headers['X-RateLimit-Limit'] = String(rateLimitResult.limit)
+  }
+  if (rateLimitResult.remaining !== undefined) {
+    headers['X-RateLimit-Remaining'] = String(rateLimitResult.remaining)
+  }
+  if (rateLimitResult.retryAfter !== undefined) {
+    headers['X-RateLimit-Reset'] = String(Math.ceil(Date.now() / 1000) + rateLimitResult.retryAfter)
+    headers['Retry-After'] = String(rateLimitResult.retryAfter)
+  }
+
+  return headers
 }
 
 // ============================================================================
@@ -127,26 +191,41 @@ const CORS_HEADERS = {
 // ============================================================================
 
 /**
- * Create a success response
+ * Create a success response with optional caching and rate limit headers
  */
-function successResponse(result: unknown): Response {
+function successResponse(
+  result: unknown,
+  method?: string,
+  rateLimitResult?: RateLimitResult,
+  requestId?: string
+): Response {
   const body: RpcSuccessResponse = { ok: 1, result }
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...CORS_HEADERS,
+    ...(method ? getCacheHeaders(method) : {}),
+    ...getRateLimitHeaders(rateLimitResult),
+  }
+
+  if (requestId) {
+    headers['X-Request-ID'] = requestId
+  }
+
   return new Response(JSON.stringify(body), {
     status: 200,
-    headers: {
-      'Content-Type': 'application/json',
-      ...CORS_HEADERS,
-    },
+    headers,
   })
 }
 
 /**
- * Create an error response
+ * Create an error response with optional rate limit headers
  */
 function errorResponse(
   message: string,
   errorCode: { code: number; name: string },
-  status = 400
+  status = 400,
+  rateLimitResult?: RateLimitResult,
+  requestId?: string
 ): Response {
   const body: RpcErrorResponse = {
     ok: 0,
@@ -154,12 +233,20 @@ function errorResponse(
     code: errorCode.code,
     codeName: errorCode.name,
   }
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-store',
+    ...CORS_HEADERS,
+    ...getRateLimitHeaders(rateLimitResult),
+  }
+
+  if (requestId) {
+    headers['X-Request-ID'] = requestId
+  }
+
   return new Response(JSON.stringify(body), {
     status,
-    headers: {
-      'Content-Type': 'application/json',
-      ...CORS_HEADERS,
-    },
+    headers,
   })
 }
 
@@ -226,6 +313,9 @@ function safeCompare(a: string, b: string): boolean {
 export function createRpcHandler(env: RpcEnv, _ctx: ExecutionContext): RpcHandler {
   return {
     async fetch(request: Request): Promise<Response> {
+      // Extract request ID for tracing
+      const requestId = request.headers.get('X-Request-ID') ?? undefined
+
       // Handle OPTIONS preflight request
       if (request.method === 'OPTIONS') {
         return new Response(null, {
@@ -236,7 +326,7 @@ export function createRpcHandler(env: RpcEnv, _ctx: ExecutionContext): RpcHandle
 
       // Only accept POST requests
       if (request.method !== 'POST') {
-        return errorResponse('Method not allowed. Use POST.', ErrorCodes.BadValue, 405)
+        return errorResponse('Method not allowed. Use POST.', ErrorCodes.BadValue, 405, undefined, requestId)
       }
 
       // Check content type
@@ -244,7 +334,10 @@ export function createRpcHandler(env: RpcEnv, _ctx: ExecutionContext): RpcHandle
       if (!contentType?.includes('application/json')) {
         return errorResponse(
           'Invalid Content-Type. Expected application/json.',
-          ErrorCodes.BadValue
+          ErrorCodes.BadValue,
+          400,
+          undefined,
+          requestId
         )
       }
 
@@ -262,7 +355,7 @@ export function createRpcHandler(env: RpcEnv, _ctx: ExecutionContext): RpcHandle
         }
 
         if (!token || !safeCompare(token, env.MONDO_AUTH_TOKEN)) {
-          return errorResponse('Unauthorized', ErrorCodes.Unauthorized, 401)
+          return errorResponse('Unauthorized', ErrorCodes.Unauthorized, 401, undefined, requestId)
         }
       }
 
@@ -271,23 +364,43 @@ export function createRpcHandler(env: RpcEnv, _ctx: ExecutionContext): RpcHandle
       try {
         const text = await request.text()
         if (!text) {
-          return errorResponse('Empty request body', ErrorCodes.BadValue)
+          return errorResponse('Empty request body', ErrorCodes.BadValue, 400, undefined, requestId)
         }
         body = JSON.parse(text) as RpcRequest
       } catch {
-        return errorResponse('Invalid JSON body', ErrorCodes.BadValue)
+        return errorResponse('Invalid JSON body', ErrorCodes.BadValue, 400, undefined, requestId)
       }
 
       // Validate method
       if (!body.method) {
-        return errorResponse('Missing required field: method', ErrorCodes.BadValue)
+        return errorResponse('Missing required field: method', ErrorCodes.BadValue, 400, undefined, requestId)
       }
 
       if (!SUPPORTED_METHODS.has(body.method)) {
         return errorResponse(
           `Unknown method: ${body.method}`,
-          ErrorCodes.CommandNotFound
+          ErrorCodes.CommandNotFound,
+          400,
+          undefined,
+          requestId
         )
+      }
+
+      // Rate limiting check (if hook is configured)
+      let rateLimitResult: RateLimitResult | undefined
+      if (env.rateLimitHook) {
+        const clientId = request.headers.get('Authorization') ?? request.headers.get('CF-Connecting-IP') ?? undefined
+        rateLimitResult = await env.rateLimitHook(request, body.method, clientId)
+
+        if (!rateLimitResult.allowed) {
+          return errorResponse(
+            'Rate limit exceeded',
+            { code: 429, name: 'TooManyRequests' },
+            429,
+            rateLimitResult,
+            requestId
+          )
+        }
       }
 
       // Validate db parameter for methods that require it
@@ -295,7 +408,10 @@ export function createRpcHandler(env: RpcEnv, _ctx: ExecutionContext): RpcHandle
         if (!isValidDbName(body.db)) {
           return errorResponse(
             'Missing required field: db',
-            ErrorCodes.BadValue
+            ErrorCodes.BadValue,
+            400,
+            rateLimitResult,
+            requestId
           )
         }
       }
@@ -305,7 +421,10 @@ export function createRpcHandler(env: RpcEnv, _ctx: ExecutionContext): RpcHandle
         if (!isValidCollectionName(body.collection)) {
           return errorResponse(
             'Missing required field: collection',
-            ErrorCodes.BadValue
+            ErrorCodes.BadValue,
+            400,
+            rateLimitResult,
+            requestId
           )
         }
 
@@ -314,13 +433,15 @@ export function createRpcHandler(env: RpcEnv, _ctx: ExecutionContext): RpcHandle
           return errorResponse(
             `Cannot write to system collection: ${body.collection}`,
             ErrorCodes.Unauthorized,
-            403
+            403,
+            rateLimitResult,
+            requestId
           )
         }
       }
 
       // Validate method-specific parameters
-      const validationError = validateMethodParams(body)
+      const validationError = validateMethodParams(body, rateLimitResult, requestId)
       if (validationError) {
         return validationError
       }
@@ -328,9 +449,9 @@ export function createRpcHandler(env: RpcEnv, _ctx: ExecutionContext): RpcHandle
       // Route to Durable Object
       try {
         const result = await routeToDurableObject(env, body)
-        return successResponse(result)
+        return successResponse(result, body.method, rateLimitResult, requestId)
       } catch (error) {
-        return handleError(error)
+        return handleError(error, rateLimitResult, requestId)
       }
     },
   }
@@ -339,13 +460,20 @@ export function createRpcHandler(env: RpcEnv, _ctx: ExecutionContext): RpcHandle
 /**
  * Validate method-specific parameters
  */
-function validateMethodParams(body: RpcRequest): Response | null {
+function validateMethodParams(
+  body: RpcRequest,
+  rateLimitResult?: RateLimitResult,
+  requestId?: string
+): Response | null {
   switch (body.method) {
     case 'insertMany':
       if (!body.documents || !Array.isArray(body.documents)) {
         return errorResponse(
           'Missing required field: documents',
-          ErrorCodes.BadValue
+          ErrorCodes.BadValue,
+          400,
+          rateLimitResult,
+          requestId
         )
       }
       break
@@ -355,13 +483,19 @@ function validateMethodParams(body: RpcRequest): Response | null {
       if (!body.filter || typeof body.filter !== 'object') {
         return errorResponse(
           'Missing required field: filter',
-          ErrorCodes.BadValue
+          ErrorCodes.BadValue,
+          400,
+          rateLimitResult,
+          requestId
         )
       }
       if (!body.update || typeof body.update !== 'object') {
         return errorResponse(
           'Missing required field: update',
-          ErrorCodes.BadValue
+          ErrorCodes.BadValue,
+          400,
+          rateLimitResult,
+          requestId
         )
       }
       break
@@ -371,7 +505,10 @@ function validateMethodParams(body: RpcRequest): Response | null {
       if (!body.filter || typeof body.filter !== 'object') {
         return errorResponse(
           'Missing required field: filter',
-          ErrorCodes.BadValue
+          ErrorCodes.BadValue,
+          400,
+          rateLimitResult,
+          requestId
         )
       }
       break
@@ -380,13 +517,19 @@ function validateMethodParams(body: RpcRequest): Response | null {
       if (!body.pipeline) {
         return errorResponse(
           'Missing required field: pipeline',
-          ErrorCodes.BadValue
+          ErrorCodes.BadValue,
+          400,
+          rateLimitResult,
+          requestId
         )
       }
       if (!Array.isArray(body.pipeline)) {
         return errorResponse(
           'pipeline must be an array',
-          ErrorCodes.BadValue
+          ErrorCodes.BadValue,
+          400,
+          rateLimitResult,
+          requestId
         )
       }
       break
@@ -395,7 +538,10 @@ function validateMethodParams(body: RpcRequest): Response | null {
       if (!body.field || typeof body.field !== 'string') {
         return errorResponse(
           'Missing required field: field',
-          ErrorCodes.BadValue
+          ErrorCodes.BadValue,
+          400,
+          rateLimitResult,
+          requestId
         )
       }
       break
@@ -405,7 +551,10 @@ function validateMethodParams(body: RpcRequest): Response | null {
       if (body.filter !== undefined && typeof body.filter !== 'object') {
         return errorResponse(
           'filter must be an object',
-          ErrorCodes.BadValue
+          ErrorCodes.BadValue,
+          400,
+          rateLimitResult,
+          requestId
         )
       }
       break
@@ -504,7 +653,11 @@ function buildInternalBody(body: RpcRequest): Record<string, unknown> {
 /**
  * Handle errors and convert to appropriate responses
  */
-function handleError(error: unknown): Response {
+function handleError(
+  error: unknown,
+  rateLimitResult?: RateLimitResult,
+  requestId?: string
+): Response {
   if (error instanceof Error) {
     const errorWithCode = error as Error & { code?: number }
 
@@ -513,7 +666,9 @@ function handleError(error: unknown): Response {
       return errorResponse(
         error.message,
         ErrorCodes.NamespaceNotFound,
-        404
+        404,
+        rateLimitResult,
+        requestId
       )
     }
 
@@ -521,7 +676,9 @@ function handleError(error: unknown): Response {
       return errorResponse(
         error.message,
         ErrorCodes.DuplicateKey,
-        409
+        409,
+        rateLimitResult,
+        requestId
       )
     }
 
@@ -529,7 +686,9 @@ function handleError(error: unknown): Response {
       return errorResponse(
         error.message,
         ErrorCodes.Unauthorized,
-        401
+        401,
+        rateLimitResult,
+        requestId
       )
     }
 
@@ -537,14 +696,18 @@ function handleError(error: unknown): Response {
     return errorResponse(
       error.message,
       ErrorCodes.InternalError,
-      500
+      500,
+      rateLimitResult,
+      requestId
     )
   }
 
   return errorResponse(
     'Unknown error',
     ErrorCodes.InternalError,
-    500
+    500,
+    rateLimitResult,
+    requestId
   )
 }
 
